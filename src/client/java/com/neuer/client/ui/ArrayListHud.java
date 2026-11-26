@@ -1,0 +1,664 @@
+package com.neuer.client.ui;
+
+import com.neuer.client.NeuerClient;
+import com.neuer.client.glassui.theme.UiTheme;
+import com.neuer.client.glassui.theme.UiThemeContext;
+import com.neuer.client.gui.PastelShaderBackground;
+import com.neuer.client.module.Module;
+import com.neuer.client.module.ModuleManager;
+import com.neuer.client.setting.Setting;
+import com.neuer.client.setting.SettingsManager;
+import com.neuer.client.utils.AnimationUtil;
+import com.neuer.client.utils.ImGuiTextures;
+import com.neuer.client.utils.InputUtil;
+import com.mojang.blaze3d.platform.Window;
+import imgui.ImDrawList;
+import imgui.ImFont;
+import imgui.ImGui;
+import imgui.ImGuiIO;
+import imgui.ImVec2;
+import imgui.flag.ImDrawFlags;
+import java.awt.Color;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.resources.Identifier;
+import org.joml.Matrix3x2fStack;
+import xyz.breadloaf.imguimc.imgui.ImguiLoader;
+
+public class ArrayListHud {
+    public static final ArrayListHud INSTANCE = new ArrayListHud();
+
+    public double x = 5;
+    public double y = 5;
+
+    private static final Identifier LOGO_ID = Identifier.parse("neuerclient:textures/logo.png");
+    private static final ImVec2 textSize = new ImVec2();
+    private static final ImVec2 keySize = new ImVec2();
+
+    private final Map<Module, Float> slotY = new HashMap<>();
+    private final Map<Module, Float> imguiAnim = new HashMap<>();
+
+    private int lastRenderR = 42;
+    private int lastRenderG = 168;
+    private int lastRenderB = 255;
+    private int lastBgAlpha = 238;
+    private float lastGlassOpacity = 0.78f;
+    private boolean lastGlowEnabled = true;
+    private String lastAlignment = "Left";
+    private float lastStartY = 43f;
+    private float lastScale = 1f;
+    private float lastAnimSpeed = 0.15f;
+    private boolean visibleThisFrame;
+
+    private static class RowEntry {
+        final Module module;
+        final String suffix;
+        final float nameW;
+        final float suffixW;
+        final float pillW;
+        final float totalW;
+        final float anim;
+
+        RowEntry(Module module, String suffix, float nameW, float suffixW, float pillW, float totalW, float anim) {
+            this.module = module;
+            this.suffix = suffix;
+            this.nameW = nameW;
+            this.suffixW = suffixW;
+            this.pillW = pillW;
+            this.totalW = totalW;
+            this.anim = anim;
+        }
+    }
+
+    private static int col(int r, int g, int b, int a) {
+        int ca = Math.max(0, Math.min(255, a));
+        int cr = Math.max(0, Math.min(255, r));
+        int cg = Math.max(0, Math.min(255, g));
+        int cb = Math.max(0, Math.min(255, b));
+        return ((ca & 0xFF) << 24) | ((cb & 0xFF) << 16) | ((cg & 0xFF) << 8) | (cr & 0xFF);
+    }
+
+    private static float clamp(float v, float lo, float hi) {
+        return Math.max(lo, Math.min(hi, v));
+    }
+
+    private static boolean shouldExcludeFromArrayList(Module m) {
+        if (m == null || m.isHidden()) {
+            return true;
+        }
+        String name = m.getName();
+        if (name == null) {
+            return true;
+        }
+        return "Menu".equalsIgnoreCase(name)
+            || "GUI".equalsIgnoreCase(name)
+            || "Theme".equalsIgnoreCase(name)
+            || "HUDEditor".equalsIgnoreCase(name)
+            || "Configurator".equalsIgnoreCase(name)
+            || "RecommendedConfigs".equalsIgnoreCase(name)
+            || "Config Menu".equalsIgnoreCase(name);
+    }
+
+    private static void drawShaderBox(
+        ImDrawList dl,
+        int shaderTex,
+        float x1,
+        float y1,
+        float x2,
+        float y2,
+        float boxX,
+        float boxY,
+        float boxW,
+        float boxH,
+        int alpha,
+        float round,
+        int flags
+    ) {
+        int clampedA = Math.max(0, Math.min(255, alpha));
+        if (clampedA == 0 || shaderTex == 0) {
+            return;
+        }
+        float bw = Math.max(1f, boxW);
+        float bh = Math.max(1f, boxH);
+        float u1 = clamp(0.06f + ((x1 - boxX) / bw) * 0.88f, 0.04f, 0.96f);
+        float v1 = clamp(0.94f - ((y1 - boxY) / bh) * 0.88f, 0.04f, 0.96f);
+        float u2 = clamp(0.06f + ((x2 - boxX) / bw) * 0.88f, 0.04f, 0.96f);
+        float v2 = clamp(0.94f - ((y2 - boxY) / bh) * 0.88f, 0.04f, 0.96f);
+        int tint = col(255, 255, 255, clampedA);
+        if (round > 0f) {
+            dl.addImageRounded(shaderTex, x1, y1, x2, y2, u1, v1, u2, v2, tint, round, flags);
+        } else {
+            dl.addImage(shaderTex, x1, y1, x2, y2, u1, v1, u2, v2, tint);
+        }
+    }
+
+    private static int[] sampleAccentWave(int baseR, int baseG, int baseB, float time, int index) {
+        float[] hsb = Color.RGBtoHSB(baseR, baseG, baseB, null);
+        float wave = (float) Math.sin(time * 1.45f + index * 0.40f);
+        float shiftedHue = ((hsb[0] + wave * 0.045f) % 1f + 1f) % 1f;
+        float sat = clamp(hsb[1] * (0.92f + 0.08f * wave), 0.15f, 1f);
+        float bri = clamp(hsb[2] * (0.96f + 0.06f * wave), 0.45f, 1f);
+        int rgb = Color.HSBtoRGB(shiftedHue, sat, bri);
+        return new int[]{
+            (rgb >> 16) & 0xFF,
+            (rgb >> 8) & 0xFF,
+            rgb & 0xFF
+        };
+    }
+
+    private void renderKeybinds(
+        float k,
+        float displayW,
+        boolean arrayRight,
+        int ar,
+        int ag,
+        int ab,
+        float dim,
+        int shaderTex,
+        float time
+    ) {
+        NeuerClient client = NeuerClient.INSTANCE;
+        if (client == null || client.moduleManager == null || client.settingsManager == null) {
+            return;
+        }
+        ModuleManager mm = client.moduleManager;
+        SettingsManager sm = client.settingsManager;
+        Module kbMod = mm.getModule("KeybindList");
+        if (kbMod == null || !kbMod.isToggled()) {
+            return;
+        }
+        Setting onlyEnabledSetting = sm.getSettingByName(kbMod, "Only Enabled");
+        boolean onlyEnabled = onlyEnabledSetting != null && onlyEnabledSetting.getValBoolean();
+        Setting scaleSetting = sm.getSettingByName(kbMod, "Scale");
+        float kbScale = scaleSetting != null ? (float) scaleSetting.getValDouble() : 0.85f;
+        float fontScale = clamp(kbScale * 1.12f, 0.65f, 1.35f) * 0.88f;
+
+        List<Module> mods = new ArrayList<>();
+        for (Module m : mm.modules) {
+            if (m.isHidden()) {
+                continue;
+            }
+            if (onlyEnabled && !m.isToggled()) {
+                continue;
+            }
+            int key = m.getKeyBind();
+            if (key == -1 || key == 0 || "NONE".equals(getKeyName(key))) {
+                continue;
+            }
+            mods.add(m);
+        }
+        if (mods.isEmpty()) {
+            return;
+        }
+
+        ImDrawList dl = ImGui.getBackgroundDrawList();
+        ImFont font = ImGui.getFont();
+        float baseFontSize = ImGui.getFontSize();
+        float fontSize = baseFontSize * fontScale;
+        float subFontSize = fontSize * 0.88f;
+        float rowH = fontSize + 8f * fontScale;
+        float headerH = fontSize + 13f * fontScale;
+        float maxName = 0f;
+        float maxKey = 0f;
+        for (Module m : mods) {
+            ImGui.calcTextSize(textSize, m.getName());
+            maxName = Math.max(maxName, textSize.x * fontScale);
+            ImGui.calcTextSize(keySize, getKeyName(m.getKeyBind()));
+            maxKey = Math.max(maxKey, keySize.x * fontScale * 0.88f);
+        }
+        float w = Math.max(142f * fontScale, maxName + maxKey + 48f * fontScale);
+        float h = headerH + mods.size() * rowH + 8f * fontScale;
+        float margin = 8f * k;
+        float kx = arrayRight ? margin : (displayW - margin - w);
+        float ky = margin;
+        float round = 9f;
+        int a255 = (int) (255 * dim);
+
+        if (lastGlowEnabled) {
+            float breathe = 0.5f + 0.5f * (float) Math.sin(time * 1.6f);
+            for (int i = 2; i >= 1; i--) {
+                float expand = i * 3.0f + breathe * 1.4f;
+                int glowA = (int) (((15f + breathe * 7f) / i) * dim);
+                int glowCol = col(ar, ag, ab, glowA);
+                dl.addRect(
+                    kx - expand,
+                    ky - expand,
+                    kx + w + expand,
+                    ky + h + expand,
+                    glowCol,
+                    round + expand,
+                    0,
+                    1.5f
+                );
+            }
+        }
+
+        dl.addRectFilled(kx + 2f, ky + 4f, kx + w + 2f, ky + h + 4f, col(0, 0, 0, (int) (82 * dim)), round);
+        dl.addRectFilled(kx, ky, kx + w, ky + h, col(18, 20, 26, (int) (lastBgAlpha * dim)), round);
+        drawShaderBox(
+            dl,
+            shaderTex,
+            kx,
+            ky,
+            kx + w,
+            ky + h,
+            kx,
+            ky,
+            w,
+            h,
+            (int) (96 * lastGlassOpacity * dim),
+            round,
+            0
+        );
+        dl.addRectFilled(kx, ky, kx + w, ky + h, col(18, 21, 28, (int) (145 * dim)), round);
+
+        dl.addRectFilled(
+            kx,
+            ky,
+            kx + w,
+            ky + headerH,
+            col(22, 25, 34, (int) (228 * dim)),
+            round,
+            ImDrawFlags.RoundCornersTop
+        );
+        drawShaderBox(
+            dl,
+            shaderTex,
+            kx,
+            ky,
+            kx + w,
+            ky + headerH,
+            kx,
+            ky,
+            w,
+            h,
+            (int) (90 * lastGlassOpacity * dim),
+            round,
+            ImDrawFlags.RoundCornersTop
+        );
+        dl.addLine(kx, ky + headerH, kx + w, ky + headerH, col(255, 255, 255, (int) (34 * dim)), 1f);
+
+        float pulse = 0.55f + 0.45f * (float) Math.sin(time * 2.2f);
+        int borderA = (int) ((75f + 40f * pulse) * dim);
+        dl.addRect(kx, ky, kx + w, ky + h, col(ar, ag, ab, borderA), round, 0, 1.1f);
+
+        float dotX = kx + 12.5f;
+        float dotY = ky + headerH * 0.5f;
+        dl.addCircleFilled(dotX, dotY, 4.6f * fontScale, col(ar, ag, ab, (int) (65 * dim)));
+        dl.addCircleFilled(dotX, dotY, 2.7f * fontScale, col(ar, ag, ab, a255));
+        dl.addText(font, fontSize, kx + 22f, ky + (headerH - fontSize) * 0.5f, col(246, 249, 255, a255), "Keybinds");
+
+        String count = String.valueOf(mods.size());
+        ImGui.calcTextSize(keySize, count);
+        float cntTextW = keySize.x * (subFontSize / baseFontSize);
+        float cntW = cntTextW + 10f;
+        float cntH = subFontSize + 4f;
+        float cntX = kx + w - 8f - cntW;
+        float cntY = ky + (headerH - cntH) * 0.5f;
+        dl.addRectFilled(cntX, cntY, cntX + cntW, cntY + cntH, col(255, 255, 255, (int) (22 * dim)), 4f);
+        dl.addRect(cntX, cntY, cntX + cntW, cntY + cntH, col(ar, ag, ab, (int) (110 * dim)), 4f, 0, 0.9f);
+        dl.addText(font, subFontSize, cntX + 5f, cntY + (cntH - subFontSize) * 0.5f, col(ar, ag, ab, (int) (245 * dim)), count);
+
+        float ry = ky + headerH + 4f * fontScale;
+        for (int idx = 0; idx < mods.size(); idx++) {
+            Module m = mods.get(idx);
+            boolean on = m.isToggled();
+            int[] waveRgb = sampleAccentWave(ar, ag, ab, time, idx);
+            int wr = waveRgb[0];
+            int wg = waveRgb[1];
+            int wb = waveRgb[2];
+            int nameCol = on ? col(246, 249, 255, a255) : col(182, 190, 206, (int) (208 * dim));
+            dl.addText(font, fontSize, kx + 10f, ry + (rowH - fontSize) * 0.5f, nameCol, m.getName());
+            String key = getKeyName(m.getKeyBind());
+            ImGui.calcTextSize(keySize, key);
+            float keyTextW = keySize.x * (subFontSize / baseFontSize);
+            float pw = keyTextW + 11f;
+            float px = kx + w - 8f - pw;
+            float py = ry + 2f;
+            float ph = rowH - 4f;
+            int pillBg = on ? col(wr, wg, wb, (int) (88 * dim)) : col(255, 255, 255, (int) (18 * dim));
+            int pillBd = on ? col(wr, wg, wb, (int) (205 * dim)) : col(255, 255, 255, (int) (42 * dim));
+            dl.addRectFilled(px, py, px + pw, py + ph, pillBg, 4.5f);
+            dl.addRect(px, py, px + pw, py + ph, pillBd, 4.5f, 0, 1f);
+            int keyCol = on ? col(250, 252, 255, a255) : col(196, 204, 218, (int) (215 * dim));
+            dl.addText(font, subFontSize, px + 5.5f, py + (ph - subFontSize) * 0.5f, keyCol, key);
+            ry += rowH;
+        }
+    }
+
+    public void renderImGui() {
+        if (!visibleThisFrame) {
+            return;
+        }
+        visibleThisFrame = false;
+        Minecraft mc = Minecraft.getInstance();
+        if (mc == null || mc.player == null) {
+            return;
+        }
+        NeuerClient client = NeuerClient.INSTANCE;
+        if (client == null || client.moduleManager == null || client.settingsManager == null) {
+            return;
+        }
+        ModuleManager mm = client.moduleManager;
+        SettingsManager sm = client.settingsManager;
+
+        var currentScreen = mc.gui.screen();
+        float dim = currentScreen != null ? 0.35f : 1f;
+        Window window = mc.getWindow();
+        float guiScale = (float) window.getGuiScale();
+        float uiScale = ImguiLoader.getUiScale();
+        ImGuiIO io = ImGui.getIO();
+        float displayW = io.getDisplaySizeX();
+        boolean right = "Right".equalsIgnoreCase(lastAlignment);
+        float dt = Math.min(0.1f, io.getDeltaTime());
+        float speed = Math.max(4f, lastAnimSpeed * 60f);
+
+        ImFont font = ImGui.getFont();
+        float rawFontSize = ImGui.getFontSize();
+        float fontScale = clamp(lastScale, 0.5f, 1.5f) * 0.90f;
+        float titleFontSize = rawFontSize * fontScale;
+        float subFontSize = titleFontSize * 0.85f;
+        float rowH = titleFontSize + 9f * fontScale;
+        float gap = 3f * fontScale;
+
+        List<RowEntry> rows = new ArrayList<>();
+        float maxRowW = 120f;
+        for (Module m : mm.modules) {
+            if (shouldExcludeFromArrayList(m)) {
+                slotY.remove(m);
+                continue;
+            }
+            float a = imguiAnim.getOrDefault(m, 0f);
+            float target = m.isToggled() ? 1f : 0f;
+            a += (target - a) * Math.min(1f, dt * speed);
+            imguiAnim.put(m, a);
+            if (a < 0.01f) {
+                slotY.remove(m);
+                continue;
+            }
+            String suffix = resolveModuleSuffix(sm, m);
+            ImGui.calcTextSize(textSize, m.getName());
+            float nameW = textSize.x * (titleFontSize / rawFontSize);
+            float suffixW = 0f;
+            float pillW = 0f;
+            if (!suffix.isEmpty()) {
+                ImGui.calcTextSize(textSize, suffix);
+                suffixW = textSize.x * (subFontSize / rawFontSize);
+                pillW = suffixW + 10f * fontScale;
+            }
+            float totalW = nameW + (pillW > 0f ? (pillW + 7f * fontScale) : 0f) + 20f * fontScale;
+            maxRowW = Math.max(maxRowW, totalW);
+            rows.add(new RowEntry(m, suffix, nameW, suffixW, pillW, totalW, a));
+        }
+        rows.sort((r1, r2) -> Float.compare(r2.totalW, r1.totalW));
+
+        ImDrawList dl = ImGui.getBackgroundDrawList();
+        float margin = 6f * (guiScale / uiScale);
+        float startY = lastStartY * (guiScale / uiScale);
+        float targetY = startY;
+        float time = (float) (System.nanoTime() / 1_000_000_000.0);
+
+        float[] hsb = Color.RGBtoHSB(lastRenderR, lastRenderG, lastRenderB, null);
+        int shader = PastelShaderBackground.render() ? PastelShaderBackground.glTextureId() : 0;
+        if (shader != 0) {
+            ImGuiTextures.prepare(shader, true);
+        }
+
+        int baseAcc = Color.HSBtoRGB(hsb[0], hsb[1], hsb[2]);
+        int baseAr = (baseAcc >> 16) & 0xFF;
+        int baseAg = (baseAcc >> 8) & 0xFF;
+        int baseAb = baseAcc & 0xFF;
+        renderKeybinds(guiScale / uiScale, displayW, right, baseAr, baseAg, baseAb, dim, shader, time);
+
+        if (rows.isEmpty()) {
+            return;
+        }
+
+        float totalStackH = Math.max(180f, rows.size() * (rowH + gap) + 16f);
+        float shaderBoxW = Math.max(180f, maxRowW + 16f);
+        float shaderBoxX = right ? (displayW - margin - shaderBoxW) : margin;
+        float shaderBoxY = startY;
+
+        for (int i = 0; i < rows.size(); i++) {
+            RowEntry row = rows.get(i);
+            Module m = row.module;
+            float a = row.anim;
+            float e = AnimationUtil.easeOutCubic(a);
+            float visA = a * dim;
+
+            float current = slotY.getOrDefault(m, targetY);
+            current += (targetY - current) * Math.min(1f, dt * 16f);
+            slotY.put(m, current);
+
+            float w = row.totalW;
+            float h = rowH * e;
+            float slide = (1f - e) * (w + 14f);
+            float rx = right ? (displayW - margin - w + slide) : (margin - slide);
+            float ry = current;
+            float round = 7f * fontScale;
+
+            int[] waveRgb = sampleAccentWave(lastRenderR, lastRenderG, lastRenderB, time, i);
+            int ar = waveRgb[0];
+            int ag = waveRgb[1];
+            int ab = waveRgb[2];
+            int alpha = (int) (255 * visA);
+
+            if (lastGlowEnabled && e > 0.4f) {
+                dl.addRect(
+                    rx - 1.5f,
+                    ry - 1.5f,
+                    rx + w + 1.5f,
+                    ry + h + 1.5f,
+                    col(ar, ag, ab, (int) (32 * visA)),
+                    round + 1.5f,
+                    0,
+                    1.5f
+                );
+            }
+
+            float shadowOffX = right ? -1.5f : 1.5f;
+            dl.addRectFilled(
+                rx + shadowOffX,
+                ry + 2.5f,
+                rx + w + shadowOffX,
+                ry + h + 2.5f,
+                col(0, 0, 0, (int) (78 * visA)),
+                round
+            );
+
+            dl.addRectFilled(rx, ry, rx + w, ry + h, col(18, 20, 26, (int) (lastBgAlpha * visA)), round);
+
+            drawShaderBox(
+                dl,
+                shader,
+                rx,
+                ry,
+                rx + w,
+                ry + h,
+                shaderBoxX,
+                shaderBoxY,
+                shaderBoxW,
+                totalStackH,
+                (int) (98 * lastGlassOpacity * visA),
+                round,
+                0
+            );
+
+            dl.addRectFilled(rx, ry, rx + w, ry + h, col(18, 21, 28, (int) (132 * visA)), round);
+            dl.addRectFilled(rx, ry, rx + w, ry + h, col(ar, ag, ab, (int) (26 * visA)), round);
+
+            float sweep = (((time * 0.34f + i * 0.09f) % 2.2f) - 0.5f);
+            float bandW = Math.max(24f, w * 0.32f);
+            float bx = rx + sweep * w;
+            if (bx + bandW > rx && bx - bandW < rx + w && h > 4f) {
+                dl.pushClipRect(rx + 2f, ry + 1f, rx + w - 2f, ry + h - 1f, true);
+                int shimClear = col(ar, ag, ab, 0);
+                int shimPeak = col(ar, ag, ab, (int) (30 * visA));
+                dl.addRectFilledMultiColor(bx - bandW, ry, bx, ry + h, shimClear, shimPeak, shimPeak, shimClear);
+                dl.addRectFilledMultiColor(bx, ry, bx + bandW, ry + h, shimPeak, shimClear, shimClear, shimPeak);
+                dl.popClipRect();
+            }
+
+            int glowIn = col(ar, ag, ab, (int) (72 * visA));
+            int glowOut = col(ar, ag, ab, 0);
+            float glowW = Math.min(w * 0.48f, 28f);
+            float barH = Math.max(4f, (h - 9f * fontScale) * e);
+            float midY = ry + h * 0.5f;
+            if (right) {
+                dl.addRectFilledMultiColor(rx + w - glowW, ry, rx + w, ry + h, glowOut, glowIn, glowIn, glowOut);
+                dl.addRectFilled(rx + w - 6.5f * fontScale, midY - barH * 0.5f, rx + w - 3.3f * fontScale, midY + barH * 0.5f, col(ar, ag, ab, alpha), 1.6f);
+            } else {
+                dl.addRectFilledMultiColor(rx, ry, rx + glowW, ry + h, glowIn, glowOut, glowOut, glowIn);
+                dl.addRectFilled(rx + 3.3f * fontScale, midY - barH * 0.5f, rx + 6.5f * fontScale, midY + barH * 0.5f, col(ar, ag, ab, alpha), 1.6f);
+            }
+
+            dl.addRect(rx, ry, rx + w, ry + h, col(ar, ag, ab, (int) (148 * visA)), round, 0, 1.0f);
+
+            if (e > 0.35f) {
+                float ty = ry + (h - titleFontSize) * 0.5f;
+                float tx = right ? (rx + 9f * fontScale) : (rx + 11f * fontScale);
+                dl.addText(font, titleFontSize, tx + 0.8f, ty + 0.8f, col(0, 0, 0, (int) (145 * visA)), m.getName());
+                dl.addText(font, titleFontSize, tx, ty, col(246, 249, 255, alpha), m.getName());
+
+                if (!row.suffix.isEmpty()) {
+                    float px = tx + row.nameW + 6f * fontScale;
+                    float ph = subFontSize + 3.5f * fontScale;
+                    float py = ry + (h - ph) * 0.5f;
+                    dl.addRectFilled(px, py, px + row.pillW, py + ph, col(255, 255, 255, (int) (20 * visA)), 4f * fontScale);
+                    dl.addRect(px, py, px + row.pillW, py + ph, col(ar, ag, ab, (int) (105 * visA)), 4f * fontScale, 0, 1f);
+                    dl.addText(
+                        font,
+                        subFontSize,
+                        px + 5f * fontScale,
+                        py + (ph - subFontSize) * 0.5f,
+                        col(ar, ag, ab, (int) (245 * visA)),
+                        row.suffix
+                    );
+                }
+            }
+
+            targetY += (rowH + gap) * e;
+        }
+    }
+
+    private String resolveModuleSuffix(SettingsManager sm, Module m) {
+        List<Setting> settings = sm.getSettingsByMod(m);
+        if (settings == null) {
+            return "";
+        }
+        for (Setting st : settings) {
+            if (st.isCombo()) {
+                String val = st.getValString();
+                return val != null ? val : "";
+            }
+        }
+        return "";
+    }
+
+    public void render(GuiGraphicsExtractor guiGraphics, float partialTick) {
+        NeuerClient client = NeuerClient.INSTANCE;
+        if (client == null || client.moduleManager == null || client.settingsManager == null) {
+            return;
+        }
+        ModuleManager mm = client.moduleManager;
+        SettingsManager sm = client.settingsManager;
+
+        Module arrayListMod = mm.getModule("ArrayList");
+        if (arrayListMod == null || !arrayListMod.isToggled()) {
+            return;
+        }
+
+        Module bypassMod = mm.getModule("Bypass");
+        if (bypassMod != null && bypassMod.isToggled()) {
+            return;
+        }
+
+        Setting syncSetting = sm.getSettingByName(arrayListMod, "Sync Theme");
+        boolean syncTheme = syncSetting == null || syncSetting.getValBoolean();
+        Setting alignSetting = sm.getSettingByName(arrayListMod, "Alignment");
+        String alignment = alignSetting != null ? alignSetting.getValString() : "Left";
+        Setting offsetSetting = sm.getSettingByName(arrayListMod, "Y Offset");
+        double startY = offsetSetting != null ? offsetSetting.getValDouble() : 5.0;
+
+        Minecraft mc = Minecraft.getInstance();
+        Window win = mc.getWindow();
+        int logoWidth = 110;
+        int logoHeight = 33;
+        int logoX = "Right".equalsIgnoreCase(alignment) ? (win.getGuiScaledWidth() - logoWidth - 5) : 5;
+        guiGraphics.blit(LOGO_ID, logoX, 5, logoX + logoWidth, 5 + logoHeight, 0.0f, 1.0f, 0.0f, 1.0f);
+
+        startY = Math.max(startY, (double) (logoHeight + 10));
+
+        UiTheme uiTheme = UiThemeContext.current();
+        int themeRgb = uiTheme.accentColor();
+        int r = (themeRgb >> 16) & 0xFF;
+        int g = (themeRgb >> 8) & 0xFF;
+        int b = themeRgb & 0xFF;
+        int bgA = 238;
+        float glassOp = 0.78f;
+        boolean glowOn = true;
+        float animSpeed = 0.15f;
+
+        Module theme = mm.getModule("Theme");
+        if (theme != null) {
+            Setting alphaS = sm.getSettingByName(theme, "Background Alpha");
+            if (alphaS != null) {
+                bgA = Math.max(150, Math.min(255, (int) alphaS.getValDouble()));
+            }
+            Setting speedS = sm.getSettingByName(theme, "Anim Speed");
+            if (speedS != null) {
+                animSpeed = (float) speedS.getValDouble() * 0.03f;
+            }
+        }
+        Module guiMod = mm.getModule("GUI");
+        if (guiMod != null) {
+            Setting glassS = sm.getSettingByName(guiMod, "Glass Opacity");
+            if (glassS != null) {
+                glassOp = (float) (glassS.getValDouble() / 100.0);
+            }
+            Setting glowS = sm.getSettingByName(guiMod, "Glow");
+            if (glowS != null) {
+                glowOn = glowS.getValBoolean();
+            }
+        }
+
+        if (!syncTheme) {
+            Setting textColorSetting = sm.getSettingByName(arrayListMod, "Text Color");
+            if (textColorSetting != null && textColorSetting.isColor()) {
+                int cVal = textColorSetting.getValColor();
+                r = (cVal >> 16) & 0xFF;
+                g = (cVal >> 8) & 0xFF;
+                b = cVal & 0xFF;
+            }
+        }
+
+        Setting scaleSetting = sm.getSettingByName(arrayListMod, "Scale");
+        float scale = scaleSetting != null ? (float) scaleSetting.getValDouble() : 1.0f;
+
+        Matrix3x2fStack pose = guiGraphics.pose();
+        pose.pushMatrix();
+        pose.scale(scale, scale);
+
+        lastRenderR = r;
+        lastRenderG = g;
+        lastRenderB = b;
+        lastBgAlpha = bgA;
+        lastGlassOpacity = glassOp;
+        lastGlowEnabled = glowOn;
+        lastAlignment = alignment;
+        lastStartY = (float) startY;
+        lastScale = scale;
+        lastAnimSpeed = animSpeed;
+        visibleThisFrame = true;
+
+        pose.popMatrix();
+    }
+
+    private String getKeyName(int key) {
+        return InputUtil.getName(key);
+    }
+}

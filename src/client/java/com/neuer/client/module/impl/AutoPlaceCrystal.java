@@ -1,0 +1,133 @@
+package com.neuer.client.module.impl;
+
+import com.neuer.client.NeuerClient;
+import com.neuer.client.module.Category;
+import com.neuer.client.module.Module;
+import com.neuer.client.setting.Setting;
+import com.neuer.client.utils.ModuleUtils;
+import com.neuer.mixin.client.MinecraftAccessor;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+
+public class AutoPlaceCrystal extends Module {
+    private final Setting onlyOnRightClick;
+    private final Setting range;
+    private final Setting preferOffhand;
+    private final Setting autoSwap;
+    private final Setting excludeBedrock;
+    private final Setting requireHoldingCrystal;
+    private final Setting requireHoldingWeapon;
+    private final Setting minSideHeight;
+    private final Setting pauseOnBlocks;
+
+    public AutoPlaceCrystal() {
+        super("AutoPlaceCrystal", Category.Crystal, "Places end crystals with tick-locked precision and zero multi-action flags.");
+
+        onlyOnRightClick = new Setting("Only On Right Click", this, true);
+        range = new Setting("Range", this, 4.5, 1.0, 6.0, false);
+        preferOffhand = new Setting("Prefer Offhand", this, true);
+        autoSwap = new Setting("Auto Swap", this, true);
+        excludeBedrock = new Setting("Exclude Bedrock", this, false);
+        requireHoldingCrystal = new Setting("Require Holding Crystal", this, false);
+        requireHoldingWeapon = new Setting("Require Holding Weapon", this, false);
+        minSideHeight = new Setting("Min Side Height", this, 0.5, 0.0, 1.0, false);
+        pauseOnBlocks = new Setting("Pause When Holding Items", this, true);
+
+        NeuerClient.INSTANCE.settingsManager.rSetting(onlyOnRightClick);
+        NeuerClient.INSTANCE.settingsManager.rSetting(range);
+        NeuerClient.INSTANCE.settingsManager.rSetting(preferOffhand);
+        NeuerClient.INSTANCE.settingsManager.rSetting(autoSwap);
+        NeuerClient.INSTANCE.settingsManager.rSetting(excludeBedrock);
+        NeuerClient.INSTANCE.settingsManager.rSetting(requireHoldingCrystal);
+        NeuerClient.INSTANCE.settingsManager.rSetting(requireHoldingWeapon);
+        NeuerClient.INSTANCE.settingsManager.rSetting(minSideHeight);
+        NeuerClient.INSTANCE.settingsManager.rSetting(pauseOnBlocks);
+    }
+
+    @Override
+    public void onTick() {
+        if (mc.player == null || mc.level == null || mc.gameMode == null)
+            return;
+
+        if (mc.gui.screen() != null)
+            return;
+
+        if (onlyOnRightClick.getValBoolean() && !mc.options.keyUse.isDown())
+            return;
+
+        if (requireHoldingCrystal.getValBoolean() && !ModuleUtils.isHoldingCrystal(mc.player))
+            return;
+
+        if (requireHoldingWeapon.getValBoolean() && !ModuleUtils.isHoldingWeapon(mc.player.getMainHandItem()))
+            return;
+
+        if (pauseOnBlocks.getValBoolean() && holdsOtherUsable()) return;
+
+        if (AutoHitCrystal.hasCrystalTarget() || AutoHitCrystal.lastHitTick == mc.player.tickCount) {
+            return;
+        }
+
+        boolean offhandHasCrystal = preferOffhand.getValBoolean() && mc.player.getOffhandItem().is(Items.END_CRYSTAL);
+        int crystalSlot = -1;
+        if (!offhandHasCrystal) {
+            crystalSlot = ModuleUtils.getCrystalSlot();
+            if (crystalSlot == -1 && !mc.player.getMainHandItem().is(Items.END_CRYSTAL)) {
+                return;
+            }
+        }
+
+        HitResult target = mc.hitResult;
+        if (target instanceof BlockHitResult bhr) {
+            BlockPos pos = bhr.getBlockPos();
+            if (!isUpperFace(bhr)) return;
+            BlockState state = mc.level.getBlockState(pos);
+            boolean allowBedrock = !excludeBedrock.getValBoolean();
+
+            if ((state.is(Blocks.OBSIDIAN) || (allowBedrock && state.is(Blocks.BEDROCK))) && canHoldCrystal(pos)) {
+                double distSq = mc.player.distanceToSqr(pos.getX() + 0.5, pos.getY() + 1.0, pos.getZ() + 0.5);
+                double r = range.getValDouble();
+                if (distSq <= r * r) {
+                    if (!offhandHasCrystal && autoSwap.getValBoolean() && crystalSlot != -1) {
+                        if (ModuleUtils.getSelectedSlot() != crystalSlot) {
+                            ModuleUtils.switchToSlot(crystalSlot);
+                        }
+                    }
+
+                    ((MinecraftAccessor) mc).setRightClickDelay(0);
+
+                    if (!mc.options.keyUse.isDown()) {
+                        ((MinecraftAccessor) mc).invokeStartUseItem();
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean isUpperFace(BlockHitResult bhr) {
+        net.minecraft.core.Direction face = bhr.getDirection();
+        if (face == net.minecraft.core.Direction.UP) return true;
+        if (face == net.minecraft.core.Direction.DOWN) return false;
+        double height = bhr.getLocation().y - bhr.getBlockPos().getY();
+        return height >= minSideHeight.getValDouble();
+    }
+
+    private boolean canHoldCrystal(BlockPos base) {
+        BlockPos above = base.above();
+        if (!mc.level.isEmptyBlock(above)) return false;
+        net.minecraft.world.phys.AABB box = new net.minecraft.world.phys.AABB(above).expandTowards(0, 1, 0);
+        return mc.level.getEntities(null, box).isEmpty();
+    }
+
+    static boolean holdsOtherUsable() {
+        net.minecraft.world.item.ItemStack main = mc.player.getMainHandItem();
+        if (main.isEmpty() || main.is(Items.END_CRYSTAL)) return false;
+        if (ModuleUtils.isHoldingWeapon(main)) return false;
+        return main.getItem() instanceof net.minecraft.world.item.BlockItem
+                || main.getUseAnimation() != net.minecraft.world.item.ItemUseAnimation.NONE
+                || main.is(Items.ENDER_PEARL) || main.is(Items.WIND_CHARGE) || main.is(Items.FLINT_AND_STEEL);
+    }
+}

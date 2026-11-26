@@ -1,0 +1,42 @@
+{
+  "ui_click": {
+    "sounds": [
+      { "name": "neuerclient:ui_click" }
+    ]
+  },
+  "ui_tick": {
+    "sounds": [
+      { "name": "neuerclient:ui_tick" }
+    ]
+  },
+  "ui_type": {
+    "sounds": [
+      { "name": "neuerclient:ui_type" }
+    ]
+  },
+  "module_on": {
+    "sounds": [
+      { "name": "neuerclient:module_on" }
+    ]
+  },
+  "module_off": {
+    "sounds": [
+      { "name": "neuerclient:module_off" }
+    ]
+  },
+  "notify_pop": {
+    "sounds": [
+      { "name": "neuerclient:notify_pop" }
+    ]
+  },
+  "gui_open": {
+    "sounds": [
+      { "name": "neuerclient:gui_open" }
+    ]
+  },
+  "gui_close": {
+    "sounds": [
+      { "name": "neuerclient:gui_close" }
+    ]
+  }
+}

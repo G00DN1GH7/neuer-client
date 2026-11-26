@@ -1,0 +1,197 @@
+plugins {
+    id 'net.fabricmc.fabric-loom' version '1.15-SNAPSHOT'
+    id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+tasks.matching { it.name == "jar" || it.name == "remapJar" || it.name == "remapClientJar" }.configureEach {
+    archiveFileName = "neuer-client-${project.mod_version}.jar"
+}
+
+loom {
+    splitEnvironmentSourceSets()
+
+    mods {
+        "neuerclient" {
+            sourceSet sourceSets.main
+            sourceSet sourceSets.client
+        }
+    }
+
+    runs {
+        client {
+            vmArg "--enable-native-access=ALL-UNNAMED"
+            vmArg "-Doshi.os.windows.perfos.disabled=true"
+            vmArg "-Doshi.os.windows.perfproc.disabled=true"
+            vmArg "-Doshi.os.windows.perfdisk.disabled=true"
+            vmArg "-Dorg.joml.unsafe=false"
+            vmArg "-Duser.language=en"
+            vmArg "-Duser.country=US"
+            vmArg "-XX:ErrorFile=${project.projectDir}/run/hs_err_%p.log"
+            vmArg "-XX:+CreateMinidumpOnCrash"
+        }
+    }
+}
+
+fabricApi {
+    configureDataGeneration {
+        client = true
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url 'https://jitpack.io' }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    implementation("org.lwjgl:lwjgl-nanovg:3.4.1") {
+        exclude group: "org.lwjgl"
+    }
+    runtimeOnly("org.lwjgl:lwjgl-nanovg:3.4.1:natives-windows") {
+        exclude group: "org.lwjgl"
+    }
+    runtimeOnly("org.lwjgl:lwjgl-nanovg:3.4.1:natives-linux") {
+        exclude group: "org.lwjgl"
+    }
+    runtimeOnly("org.lwjgl:lwjgl-nanovg:3.3.3:natives-linux-arm64") {
+        exclude group: "org.lwjgl"
+    }
+    runtimeOnly("org.lwjgl:lwjgl-nanovg:3.4.1:natives-macos") {
+        exclude group: "org.lwjgl"
+    }
+
+    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher:1.10.2"
+
+    implementation "io.github.spair:imgui-java-binding:1.86.12"
+    implementation("io.github.spair:imgui-java-lwjgl3:1.86.12") {
+        exclude group: "org.lwjgl"
+    }
+    runtimeOnly "io.github.spair:imgui-java-natives-windows:1.86.12"
+    runtimeOnly "io.github.spair:imgui-java-natives-linux:1.86.12"
+    runtimeOnly "io.github.spair:imgui-java-natives-macos:1.86.12"
+}
+
+tasks.named("test") {
+    useJUnitPlatform()
+}
+
+sourceSets {
+    test {
+        compileClasspath += sourceSets.client.compileClasspath + sourceSets.client.output
+        runtimeClasspath += sourceSets.client.runtimeClasspath + sourceSets.client.output
+    }
+}
+
+processResources {
+    inputs.property "version", project.version
+    inputs.property "minecraft_version", project.minecraft_version
+    inputs.property "loader_version", project.loader_version
+    filteringCharset "UTF-8"
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version,
+                "minecraft_version": project.minecraft_version,
+                "loader_version": project.loader_version
+    }
+}
+
+def targetJavaVersion = 25
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    it.options.compilerArgs << "-Xlint:deprecation"
+    if (targetJavaVersion >= 10 || JavaVersion.current().isJava10Compatible()) {
+        it.options.release.set(targetJavaVersion)
+    }
+}
+
+tasks.withType(JavaExec).configureEach {
+    jvmArgs("--enable-native-access=ALL-UNNAMED", "-Doshi.os.windows.perfos.disabled=true", "-Dorg.joml.unsafe=false")
+}
+
+java {
+    def javaVersion = JavaVersion.toVersion(targetJavaVersion)
+    if (JavaVersion.current() < javaVersion) {
+        toolchain.languageVersion = JavaLanguageVersion.of(targetJavaVersion)
+    }
+    withSourcesJar()
+}
+
+jar {
+    from("LICENSE.md") {
+        rename { "LICENSE_${project.archives_base_name}.md" }
+    }
+    from({
+        configurations.clientRuntimeClasspath.filter { file ->
+            file.name.contains("imgui") || file.name.contains("nanovg")
+        }.collect { zipTree(it) }
+    }) {
+        exclude "META-INF/MANIFEST.MF", "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA"
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    }
+}
+
+tasks.named("sourcesJar", Jar) {
+    from("LICENSE.md") {
+        rename { "LICENSE_${project.archives_base_name}.md" }
+    }
+}
+
+publishing {
+    publications {
+        create("mavenJava", MavenPublication) {
+            artifactId = project.archives_base_name
+            from components.java
+            pom {
+                licenses {
+                    license {
+                        name = "Night Public Software License (NPSL) Version 1.0"
+                        url = "https://gist.githubusercontent.com/nxghtCry0/b47a5c6b3cb79c90ea89fa4cc712172f/raw/2021f0e8c23750017a65e4e381a14f002e49137e/LICENSE.md"
+                        distribution = "repo"
+                    }
+                }
+            }
+        }
+    }
+
+    repositories {
+    }
+}
+
+// Toolchain overrides.
+// Point these at a JDK installation to compile or launch with a JDK other than the one running Gradle.
+// Unset by default so the build stays machine independent.
+def compilerHome = System.getenv("MOD_COMPILER_JAVA_HOME")
+def javacExe = compilerHome == null ? null : new File(compilerHome, "bin/javac" + (org.gradle.internal.os.OperatingSystem.current().isWindows() ? ".exe" : ""))
+
+if (javacExe != null && javacExe.exists() && !JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_25)) {
+    tasks.withType(JavaCompile).configureEach {
+        it.options.fork = true
+        it.options.forkOptions.executable = javacExe.absolutePath
+    }
+}
+
+def runtimeHome = System.getenv("MOD_RUN_JAVA_HOME")
+def runtimeExe = runtimeHome == null ? null : new File(runtimeHome, "bin/java" + (org.gradle.internal.os.OperatingSystem.current().isWindows() ? ".exe" : ""))
+
+if (runtimeExe != null && runtimeExe.exists()) {
+    tasks.named("runClient") {
+        executable(runtimeExe.absolutePath)
+    }
+    tasks.withType(Test).configureEach {
+        executable(runtimeExe.absolutePath)
+    }
+}

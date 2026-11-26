@@ -1,0 +1,80 @@
+package com.neuer.client.module.impl;
+
+import com.neuer.client.module.Category;
+import com.neuer.client.module.Module;
+import com.neuer.client.utils.ModuleUtils;
+import com.neuer.mixin.client.MinecraftAccessor;
+import net.minecraft.world.item.Items;
+
+public class KeybindWater extends Module {
+    private int originalSlot = -1;
+    private int step = 0;
+    private long lastExecuteMs = 0L;
+
+    public KeybindWater() {
+        super("KeybindWater", Category.UHC, "Silently places or picks up water with a water/empty bucket.");
+    }
+
+    @Override
+    public void onEnable() {
+        if (step != 0 || System.currentTimeMillis() - lastExecuteMs < 150L) {
+            this.setToggled(false);
+            return;
+        }
+    }
+
+    @Override
+    public void onTick() {
+        if (mc.player == null || mc.level == null || mc.gameMode == null) {
+            resetState();
+            this.setToggled(false);
+            return;
+        }
+
+        if (step == 0) {
+            int targetSlot = ModuleUtils.findItemInHotbar(Items.WATER_BUCKET);
+            if (targetSlot == -1) {
+                targetSlot = ModuleUtils.findItemInHotbar(Items.BUCKET);
+            }
+
+            if (targetSlot == -1) {
+                resetState();
+                this.setToggled(false);
+                return;
+            }
+
+            originalSlot = ModuleUtils.getSelectedSlot();
+            if (targetSlot != originalSlot) {
+                ModuleUtils.switchToSlot(targetSlot);
+            }
+            ((MinecraftAccessor) mc).invokeStartUseItem();
+            step = 1;
+        } else {
+            if (originalSlot >= 0 && originalSlot < 9 && originalSlot != ModuleUtils.getSelectedSlot()) {
+                ModuleUtils.switchToSlot(originalSlot);
+            }
+            lastExecuteMs = System.currentTimeMillis();
+            resetState();
+            this.setToggled(false);
+        }
+    }
+
+    private void resetState() {
+        originalSlot = -1;
+        step = 0;
+    }
+
+    @Override
+    public void onDisable() {
+        if (originalSlot >= 0 && originalSlot < 9 && mc.player != null && originalSlot != ModuleUtils.getSelectedSlot()) {
+            ModuleUtils.switchToSlot(originalSlot);
+        }
+        resetState();
+    }
+}
+
+
+
+
+
+

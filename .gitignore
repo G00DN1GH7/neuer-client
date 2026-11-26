@@ -1,0 +1,49 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# Loom (Fabric/MC modding)
+.loom/
+
+# IDE files
+.idea/
+.claude/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+
+# Java
+*.class
+
+# Run directory (Minecraft)
+run/
+.ai_backups
+
+dist/
+*.exe
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+.env
+SESSION_HANDOFF.md
+create_release.py
+AA_ROUNDED_CORNERS.md
+
+
+# Eclipse/IDE build output
+/bin/
+build/libs
+
+# Release artifacts (built jars are attached to releases, not committed)
+releases/

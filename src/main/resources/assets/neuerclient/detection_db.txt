@@ -1,0 +1,17 @@
+# Neuer Client detection rules
+#
+# One rule per line, in the form:
+#     <module>|<server>
+#
+# <module>  module name as shown in the GUI, or * for every module
+# <server>  server address, optionally with a port; * matches any prefix
+#           (e.g. *example.com matches play.example.com and example.com)
+#
+# Lines starting with # and blank lines are ignored.
+# Copy this file to config/neuerclient/detection_db.txt to use your own rules;
+# the local file replaces these bundled rules entirely.
+#
+# Examples:
+#   KillAura|*example.com
+#   Reach|play.example.com:25565
+#   *|*strict-server.net

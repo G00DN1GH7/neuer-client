@@ -1,0 +1,11 @@
+{
+"providers": [
+{
+"type": "ttf",
+"file": "neuerclient:rajdhani.ttf",
+"shift": [0, 1],
+"size": 11.5,
+"oversample": 6.0
+}
+]
+}

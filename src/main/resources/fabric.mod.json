@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "neuerclient",
+  "version": "${version}",
+  "name": "Neuer Client",
+  "description": "Private Fabric client for PvP combat, movement and rendering utilities.",
+  "authors": [],
+  "contact": {},
+  "license": "NPSL-1.0",
+  "icon": "assets/neuerclient/textures/logo.png",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-datagen": [
+      "com.neuer.client.NeuerDataGenerator"
+    ],
+    "client": [
+      "com.neuer.client.NeuerClient"
+    ],
+    "main": [
+      "com.neuer.Neuer"
+    ]
+  },
+  "mixins": [
+    "neuerclient.mixins.json",
+    {
+      "config": "neuerclient.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "~${minecraft_version}"
+  }
+}

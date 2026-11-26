@@ -1,0 +1,209 @@
+package com.neuer.client.utils;
+
+import com.neuer.client.NeuerClient;
+import com.neuer.client.glassui.theme.UiTheme;
+import com.neuer.client.glassui.theme.UiThemeContext;
+import com.neuer.client.module.Module;
+import com.neuer.client.module.ModuleManager;
+import com.neuer.client.setting.Setting;
+import com.neuer.client.setting.SettingsManager;
+import imgui.ImGui;
+import imgui.ImGuiIO;
+import net.minecraft.client.Camera;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4f;
+import org.joml.Vector3d;
+import org.joml.Vector4f;
+
+import java.awt.Color;
+
+public class RenderUtils {
+    private static final Minecraft mc = Minecraft.getInstance();
+    private static final org.joml.Vector4f transformVec = new org.joml.Vector4f();
+    private static final ThreadLocal<Matrix4f> combinedMatrixBuffer = ThreadLocal.withInitial(Matrix4f::new);
+
+    public static Vector3d project2D(double x, double y, double z, float partialTicks) {
+        Vector3d out = new Vector3d();
+        if (project2D(x, y, z, partialTicks, out)) {
+            return out;
+        }
+        return null;
+    }
+
+    public static boolean project2D(double x, double y, double z, float partialTicks, Vector3d out) {
+        Camera camera = mc.gameRenderer.mainCamera();
+        if (camera == null) return false;
+        Vec3 camPos = camera.position();
+        
+        Matrix4f combinedMatrix = camera.getViewRotationProjectionMatrix(combinedMatrixBuffer.get());
+
+        transformVec.set((float)(x - camPos.x), (float)(y - camPos.y), (float)(z - camPos.z), 1.0f);
+        combinedMatrix.transform(transformVec);
+
+        if (transformVec.w <= 0.001f) return false;
+        transformVec.div(transformVec.w);
+
+        double screenWidth = mc.getWindow().getGuiScaledWidth();
+        double screenHeight = mc.getWindow().getGuiScaledHeight();
+
+        double screenX = (screenWidth / 2.0) * (transformVec.x + 1.0);
+        double screenY = (screenHeight / 2.0) * (1.0 - transformVec.y);
+
+        out.set(screenX, screenY, transformVec.z);
+        return true;
+    }
+
+    public static boolean project2DImGui(double x, double y, double z, float partialTicks, Vector3d out) {
+        if (mc.gameRenderer == null) return false;
+        Camera camera = mc.gameRenderer.mainCamera();
+        if (camera == null) return false;
+        Vec3 camPos = camera.position();
+
+        Matrix4f combinedMatrix = camera.getViewRotationProjectionMatrix(combinedMatrixBuffer.get());
+
+        transformVec.set((float)(x - camPos.x), (float)(y - camPos.y), (float)(z - camPos.z), 1.0f);
+        combinedMatrix.transform(transformVec);
+
+        if (transformVec.w <= 0.001f) return false;
+        transformVec.div(transformVec.w);
+
+        ImGuiIO io = ImGui.getIO();
+        float displayWidth = io.getDisplaySizeX();
+        float displayHeight = io.getDisplaySizeY();
+
+        double screenX = (displayWidth / 2.0f) * (transformVec.x + 1.0f);
+        double screenY = (displayHeight / 2.0f) * (1.0f - transformVec.y);
+
+        out.set(screenX, screenY, transformVec.z);
+        return true;
+    }
+
+    public static int toImGuiColor(int r, int g, int b, int a) {
+        return ((a & 0xFF) << 24) | ((b & 0xFF) << 16) | ((g & 0xFF) << 8) | (r & 0xFF);
+    }
+
+    public static int toImGuiColor(Color color, float alphaFactor) {
+        int a = Math.max(0, Math.min(255, (int) (color.getAlpha() * alphaFactor)));
+        return ((a & 0xFF) << 24) | ((color.getBlue() & 0xFF) << 16) | ((color.getGreen() & 0xFF) << 8) | (color.getRed() & 0xFF);
+    }
+
+    private static Vec3 getCameraPos(Camera camera) {
+        return camera.position();
+    }
+
+    public static void drawLine2D(GuiGraphicsExtractor graphics, double x1, double y1, double x2, double y2, Color color) {
+        double length = Math.sqrt((x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1));
+        if (length < 0.01) return;
+        float angle = (float) Math.atan2(y2 - y1, x2 - x1);
+
+        graphics.pose().pushMatrix();
+        graphics.pose().translate((float)x1, (float)y1);
+        graphics.pose().rotate(angle);
+        graphics.fill(0, 0, (int)Math.ceil(length), 1, color.getRGB());
+        graphics.pose().popMatrix();
+    }
+
+    public static void drawCornerMarks(GuiGraphicsExtractor graphics, double minX, double minY, double maxX, double maxY, Color color) {
+        int c = color.getRGB();
+        double boxW = maxX - minX;
+        double boxH = maxY - minY;
+        double cornerLen = Math.min(Math.min(boxW, boxH) * 0.3, 15.0);
+        cornerLen = Math.max(cornerLen, 3.0);
+        int cl = (int) cornerLen;
+
+        graphics.fill((int)minX, (int)minY, (int)minX + cl, (int)minY + 1, c);
+        graphics.fill((int)minX, (int)minY, (int)minX + 1, (int)minY + cl, c);
+        graphics.fill((int)maxX - cl, (int)minY, (int)maxX, (int)minY + 1, c);
+        graphics.fill((int)maxX - 1, (int)minY, (int)maxX, (int)minY + cl, c);
+        graphics.fill((int)minX, (int)maxY - 1, (int)minX + cl, (int)maxY, c);
+        graphics.fill((int)minX, (int)maxY - cl, (int)minX + 1, (int)maxY, c);
+        graphics.fill((int)maxX - cl, (int)maxY - 1, (int)maxX, (int)maxY, c);
+        graphics.fill((int)maxX - 1, (int)maxY - cl, (int)maxX, (int)maxY, c);
+    }
+
+    public static Color getHealthColor(float pct) {
+        if (pct > 0.6f) return new Color(85, 255, 85);
+        if (pct > 0.3f) return new Color(255, 255, 85);
+        return new Color(255, 85, 85);
+    }
+
+    public static Color getThemeAccentColor() {
+        UiTheme uiTheme = UiThemeContext.current();
+        if (uiTheme != null) {
+            int acc = uiTheme.accentColor();
+            return new Color((acc >> 16) & 0xFF, (acc >> 8) & 0xFF, acc & 0xFF);
+        }
+        NeuerClient client = NeuerClient.INSTANCE;
+        if (client != null && client.moduleManager != null && client.settingsManager != null) {
+            ModuleManager mm = client.moduleManager;
+            SettingsManager sm = client.settingsManager;
+            Module theme = mm.getModule("Theme");
+            if (theme != null) {
+                Setting accSet = sm.getSettingByName(theme, "Accent Color");
+                if (accSet != null && accSet.isColor()) {
+                    int c = accSet.getValColor();
+                    return new Color((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
+                }
+            }
+        }
+        return new Color(42, 168, 255);
+    }
+
+    public static Color getThemeSecondaryColor() {
+        UiTheme uiTheme = UiThemeContext.current();
+        if (uiTheme != null) {
+            int sec = uiTheme.secondaryAccentColor();
+            return new Color((sec >> 16) & 0xFF, (sec >> 8) & 0xFF, sec & 0xFF);
+        }
+        return new Color(16, 20, 30);
+    }
+
+    public static void draw3DBox(GuiGraphicsExtractor guiGraphics, double minX, double minY, double minZ, double maxX, double maxY, double maxZ, Color faceColor, Color outlineColor, float partialTick) {
+        Vector3d[] boxProjBuffer = new Vector3d[8];
+        for (int i = 0; i < 8; i++) {
+            boxProjBuffer[i] = new Vector3d();
+        }
+        double min2dX = Double.MAX_VALUE, min2dY = Double.MAX_VALUE;
+        double max2dX = -Double.MAX_VALUE, max2dY = -Double.MAX_VALUE;
+        boolean behind = true;
+
+        Vec3[] corners = new Vec3[]{
+            new Vec3(minX, minY, minZ),
+            new Vec3(maxX, minY, minZ),
+            new Vec3(minX, maxY, minZ),
+            new Vec3(maxX, maxY, minZ),
+            new Vec3(minX, minY, maxZ),
+            new Vec3(maxX, minY, maxZ),
+            new Vec3(minX, maxY, maxZ),
+            new Vec3(maxX, maxY, maxZ)
+        };
+
+        for (int i = 0; i < 8; i++) {
+            if (project2D(corners[i].x, corners[i].y, corners[i].z, partialTick, boxProjBuffer[i])) {
+                if (boxProjBuffer[i].z > 0 && boxProjBuffer[i].z < 1.0) {
+                    behind = false;
+                    double px = boxProjBuffer[i].x;
+                    double py = boxProjBuffer[i].y;
+                    min2dX = Math.min(min2dX, px);
+                    min2dY = Math.min(min2dY, py);
+                    max2dX = Math.max(max2dX, px);
+                    max2dY = Math.max(max2dY, py);
+                }
+            }
+        }
+        if (behind) return;
+
+        if (faceColor != null && faceColor.getAlpha() > 0) {
+            guiGraphics.fill((int)min2dX, (int)min2dY, (int)max2dX, (int)max2dY, faceColor.getRGB());
+        }
+        if (outlineColor != null && outlineColor.getAlpha() > 0) {
+            int c = outlineColor.getRGB();
+            guiGraphics.fill((int)min2dX, (int)min2dY, (int)max2dX, (int)min2dY + 1, c);
+            guiGraphics.fill((int)min2dX, (int)max2dY, (int)max2dX, (int)max2dY + 1, c);
+            guiGraphics.fill((int)min2dX, (int)min2dY, (int)min2dX + 1, (int)max2dY, c);
+            guiGraphics.fill((int)max2dX, (int)min2dY, (int)max2dX + 1, (int)max2dY + 1, c);
+        }
+    }
+}
